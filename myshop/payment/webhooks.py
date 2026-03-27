@@ -46,6 +46,10 @@ def stripe_webhook(request):
 
             # Si todo está en regla, marcamos la orden como pagada (paid=True)
             order.paid = True
+
+            # Almacena el id del pago hecho en Stripe
+            order.stripe_id = session.payment_intent
+
             # Guardamos la orden con su nuevo estado en la base de datos
             order.save()
 
