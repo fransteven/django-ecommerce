@@ -4,6 +4,8 @@ from django.http import HttpResponse
 from django.views.decorators.csrf import csrf_exempt
 from orders.models import Order
 
+from .tasks import payment_completed
+
 
 @csrf_exempt
 def stripe_webhook(request):
@@ -52,6 +54,9 @@ def stripe_webhook(request):
 
             # Guardamos la orden con su nuevo estado en la base de datos
             order.save()
+
+            # launch the asynchronous task
+            payment_completed.delay(order.id)
 
     # Si la validación es exitosa, respondemos a Stripe con un HTTP 200 (OK) indicando que recibimos el webhook correctamente.
     return HttpResponse(status=200)
