@@ -21,7 +21,12 @@ def order_create(request):
         form = OrderCreateForm(request.POST)
         if form.is_valid():
             # form.save() crea una instancia del modelo Order con los datos del formulario
-            order = form.save()
+            order = form.save(commit=False)
+            # apply coupon if any
+            if cart.coupon:
+                order.coupon = cart.coupon
+                order.discount = cart.coupon.discount
+            order.save()
             for item in cart:
                 OrderItem.objects.create(
                     # Se pasa el objeto completo del carrito al modelo OrderItem
@@ -82,23 +87,29 @@ def admin_order_pdf(request, order_id):
     story.append(Paragraph("Items bought", styles["h3"]))
     table_data = [["Product", "Price", "Quantity", "Cost"]]
     for item in order.items.all():
-        table_data.append([
-            item.product.name,
-            f"${item.price}",
-            str(item.quantity),
-            f"${item.get_cost()}",
-        ])
+        table_data.append(
+            [
+                item.product.name,
+                f"${item.price}",
+                str(item.quantity),
+                f"${item.get_cost()}",
+            ]
+        )
     table_data.append(["", "", "Total", f"${order.get_total_cost()}"])
 
     table = Table(table_data, hAlign="LEFT")
-    table.setStyle(TableStyle([
-        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
-        ("LINEBELOW", (0, 0), (-1, 0), 1, colors.black),
-        ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
-        ("LINEABOVE", (0, -1), (-1, -1), 1, colors.black),
-        ("ALIGN", (1, 0), (-1, -1), "RIGHT"),
-        ("ROWBACKGROUNDS", (0, 1), (-1, -2), [colors.whitesmoke, colors.white]),
-    ]))
+    table.setStyle(
+        TableStyle(
+            [
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("LINEBELOW", (0, 0), (-1, 0), 1, colors.black),
+                ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
+                ("LINEABOVE", (0, -1), (-1, -1), 1, colors.black),
+                ("ALIGN", (1, 0), (-1, -1), "RIGHT"),
+                ("ROWBACKGROUNDS", (0, 1), (-1, -2), [colors.whitesmoke, colors.white]),
+            ]
+        )
+    )
     story.append(table)
     story.append(Spacer(1, 0.5 * cm))
 
