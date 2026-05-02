@@ -156,3 +156,79 @@ Cuando un usuario completa una compra, necesitamos actualizar las sugerencias. E
 ### ¿Por qué es eficiente?
 Aunque es un bucle anidado ($O(N^2)$), las compras suelen tener pocos productos (menos de 10-20), por lo que la ejecución es instantánea. Redis maneja la ordenación en tiempo real, por lo que pedir las recomendaciones después es extremadamente rápido.
 
+---
+
+## 5. Ejemplos Visuales de Conjuntos Ordenados (Redis)
+
+**Archivo:** `shop/recomender.py` | **Capítulo:** 10
+
+### Contexto
+El método `get_product_key(self, id)` devuelve un string con el formato `product:{id}:purchased_with`. Esta cadena funciona como el nombre de nuestra "lista" (Sorted Set) en Redis.
+
+Imagina que tenemos 4 productos en nuestra tienda:
+- ID 1: "Camiseta"
+- ID 2: "Pantalón"
+- ID 3: "Gorra"
+- ID 4: "Zapatillas"
+
+A continuación, 3 ejemplos de cómo lucirían estos conjuntos dentro de la memoria de Redis tras varias ventas:
+
+### Ejemplo 1: El conjunto del producto 1 (Camiseta)
+**Clave (Key):** `product:1:purchased_with`
+
+| Elemento (ID de otro producto) | Score (Veces comprado junto) |
+| :--- | :--- |
+| `2` *(Pantalón)* | 15 |
+| `3` *(Gorra)* | 5 |
+| `4` *(Zapatillas)* | 1 |
+
+*Interpretación:* La camiseta se ha comprado 15 veces junto con el pantalón, 5 veces con la gorra y solo 1 vez con las zapatillas. Cuando alguien compre la camiseta, le recomendaremos primero el pantalón.
+
+### Ejemplo 2: El conjunto del producto 2 (Pantalón)
+**Clave (Key):** `product:2:purchased_with`
+
+| Elemento (ID de otro producto) | Score (Veces comprado junto) |
+| :--- | :--- |
+| `1` *(Camiseta)* | 15 |
+| `4` *(Zapatillas)* | 8 |
+
+*Interpretación:* Las relaciones suelen ser recíprocas. El pantalón se compra mucho con la camiseta (15 veces) y también con zapatillas (8 veces).
+
+### Ejemplo 3: ¿Qué pasa en una nueva venta conjunta?
+Imagina que un cliente compra **Camiseta (1), Gorra (3) y Zapatillas (4)** en un mismo pedido.
+
+El método `products_bought` recorrerá esos IDs y ejecutará `r.zincrby()` para cada combinación, sumando `+1` a los scores correspondientes. Los conjuntos se actualizarían así:
+
+1. **En la clave `product:1:purchased_with`**:
+   - El ID `3` pasa de Score 5 a **6**.
+   - El ID `4` pasa de Score 1 a **2**.
+2. **En la clave `product:3:purchased_with`**:
+   - El ID `1` suma +1.
+   - El ID `4` suma +1.
+3. **En la clave `product:4:purchased_with`**:
+   - El ID `1` suma +1.
+   - El ID `3` suma +1.
+
+*Conclusión visual:* Un Sorted Set en Redis es simplemente una tabla de dos columnas adherida a una "Clave". La magia es que Redis mantiene esta tabla siempre ordenada de mayor a menor Score de forma automática e hiperrápida.
+
+---
+
+## 6. Persistencia de Datos en Redis vs. Base de Datos Relacional
+
+**Contexto:**
+Si el sistema de recomendaciones usa un "Sorted Set" en memoria, ¿es necesario crear una tabla en nuestra base de datos SQL (como PostgreSQL o SQLite) para guardar estos "pares clave-valor" permanentemente a lo largo del tiempo de vida del e-commerce?
+
+### La respuesta corta: NO.
+No necesitas crear ninguna tabla en tu base de datos principal (Django Models). Redis, a pesar de ser una base de datos **"en memoria"** (in-memory), cuenta con mecanismos nativos de **persistencia en disco**.
+
+### ¿Cómo logra persistir la información?
+Redis no es solo memoria volátil (como la memoria RAM temporal que se borra al apagar la computadora). Para evitar que los datos del e-commerce se pierdan si el servidor se reinicia o se corta la luz, Redis utiliza principalmente dos mecanismos (activados por defecto en la mayoría de las instalaciones):
+
+1. **Snapshots (RDB):** Toma "fotografías" de toda la memoria a intervalos regulares y las guarda en un archivo físico en el servidor (usualmente llamado `dump.rdb`).
+2. **Append Only File (AOF):** Registra cada operación de escritura (como nuestros `zincrby`) en un log. Al reiniciar, vuelve a "reproducir" todas las operaciones para restaurar el estado exacto.
+
+### ¿Por qué mantenerlo separado de nuestra base de datos relacional?
+Como Ingeniero de Sistemas, esto es una decisión arquitectónica clave:
+- **Separación de responsabilidades:** La base de datos principal (`SQLite/PostgreSQL`) guarda la "fuente de la verdad" inmutable y crítica (Usuarios, Órdenes, Pagos, Inventario).
+- **Rendimiento:** Redis funciona como una base de datos auxiliar para lecturas/escrituras intensivas. Guardar contadores de recomendaciones en SQL generaría un cuello de botella terrible por la constante escritura (bloqueo de filas en cada compra).
+- **Estructuras de datos:** SQL no tiene una estructura nativa de "Sorted Set". Simular esto requeriría tablas intermedias, múltiples `JOINs` y sentencias `ORDER BY` costosas, matando la escalabilidad del sistema.
